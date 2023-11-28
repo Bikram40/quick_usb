@@ -19,7 +19,11 @@ class QuickUsbWindows extends _QuickUsbDesktop {
 
 class QuickUsbMacos extends _QuickUsbDesktop {
   QuickUsbMacos() {
-    _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23.dylib'));
+    if(Platform.version.contains('arm64')) {
+      _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23-m1.dylib'));
+    } else {
+      _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23.dylib'));
+    }
   }
 }
 
