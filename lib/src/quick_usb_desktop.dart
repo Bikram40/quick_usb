@@ -1,10 +1,12 @@
+import 'dart:ffi' as ffi2;
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart' as ffi;
-import 'package:libusb/libusb64.dart';
+import 'package:libusb/libusb.dart';
 import 'package:quick_usb/src/common.dart';
+import 'package:serial_port_win32/serial_port_win32.dart';
 
 import 'quick_usb_platform_interface.dart';
 import 'utils.dart';
@@ -12,14 +14,135 @@ import 'utils.dart';
 late Libusb _libusb;
 
 class QuickUsbWindows extends _QuickUsbDesktop {
+  SerialPort? port;
+
   QuickUsbWindows() {
     _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23.dll'));
+  }
+
+  @override
+  Future<List<UsbDevice>> getDeviceList() async {
+    var d = await super.getDeviceList();
+    final List<PortInfo> portInfoLists = SerialPort.getPortsWithFullMessages();
+    portInfoLists.forEach((element) {
+      d.add(UsbDevice(
+        identifier: element.friendlyName,
+        vendorId: -1,
+        productId: -1,
+        configurationCount: -1,
+        serialPortName: element.friendlyName,
+      ));
+    });
+
+    return d;
+  }
+
+  @override
+  Future<List<UsbDeviceDescription>> getDevicesWithDescription(
+      {bool requestPermission = true}) async {
+    var d = await super.getDevicesWithDescription();
+    final List<PortInfo> portInfoLists = SerialPort.getPortsWithFullMessages();
+    portInfoLists.forEach((element) {
+      d.add(
+        UsbDeviceDescription(
+          device: UsbDevice(
+            identifier: element.friendlyName,
+            vendorId: element.friendlyName.hashCode,
+            productId: element.hardwareID.hashCode,
+            configurationCount: -1,
+            serialPortName: element.portName,
+          ),
+          product: element.friendlyName,
+          manufacturer: element.manufactureName,
+          serialNumber: element.hardwareID,
+        ),
+      );
+    });
+
+    return d;
+  }
+
+  @override
+  Future<bool> openDevice(UsbDevice usbDevice) async {
+    if (usbDevice.serialPortName != null) {
+      //this is a device from usb serial ..
+      final List<PortInfo> portInfoLists =
+          SerialPort.getPortsWithFullMessages();
+      int index = portInfoLists.indexWhere(
+          (element) => element.friendlyName == usbDevice.identifier);
+      if (index != -1) {
+        port = SerialPort(portInfoLists[index].portName);
+        port?.open();
+        return true;
+      }
+      return false;
+    }
+    return await super.openDevice(usbDevice);
+  }
+
+  @override
+  Future<bool> hasPermission(UsbDevice usbDevice) async {
+    if (usbDevice.serialPortName != null) {
+      return true;
+    }
+    return await super.hasPermission(usbDevice);
+  }
+
+  @override
+  Future<void> closeDevice() async {
+    port?.close();
+    await super.closeDevice();
+  }
+
+  @override
+  Future<void> exit() async {
+    port?.close();
+    await super.exit();
+  }
+
+  @override
+  Future<UsbConfiguration> getConfiguration(int index) async {
+    if (port != null) {
+      return UsbConfiguration(id: -1, index: index, interfaces: [
+        UsbInterface(id: -1, alternateSetting: -1, endpoints: [
+          UsbEndpoint(endpointNumber: -1, direction: UsbEndpoint.DIRECTION_OUT)
+        ])
+      ]);
+    }
+    return await super.getConfiguration(index);
+  }
+
+  @override
+  Future<bool> claimInterface(UsbInterface intf) async {
+    if (port != null) {
+      return true;
+    }
+    return await super.claimInterface(intf);
+  }
+
+  @override
+  Future<int> bulkTransferOut(
+      UsbEndpoint endpoint, Uint8List data, int timeout) async {
+    if (port != null) {
+      port!.writeBytesFromUint8List(data,timeout: timeout);
+      return data.length;
+    }
+    return await bulkTransferOut(endpoint, data, timeout);
+  }
+
+  @override
+  Future<bool> releaseInterface(UsbInterface intf) async {
+    // TODO: implement releaseInterface
+    if (port != null) {
+      return true;
+    }
+    return await releaseInterface(intf);
   }
 }
 
 class QuickUsbMacos extends _QuickUsbDesktop {
   QuickUsbMacos() {
-    if(Platform.version.contains('arm64')) {
+    if (Platform.version.contains('arm64')) {
       _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23-m1.dylib'));
     } else {
       _libusb = Libusb(DynamicLibrary.open('libusb-1.0.23.dylib'));
@@ -87,7 +210,8 @@ class _QuickUsbDesktop extends QuickUsbPlatform {
   }
 
   @override
-  Future<List<UsbDeviceDescription>> getDevicesWithDescription({bool requestPermission = true}) async {
+  Future<List<UsbDeviceDescription>> getDevicesWithDescription(
+      {bool requestPermission = true}) async {
     var devices = await getDeviceList();
     var result = <UsbDeviceDescription>[];
     for (var device in devices) {
@@ -97,7 +221,8 @@ class _QuickUsbDesktop extends QuickUsbPlatform {
   }
 
   @override
-  Future<UsbDeviceDescription> getDeviceDescription(UsbDevice usbDevice, {bool requestPermission = true}) async {
+  Future<UsbDeviceDescription> getDeviceDescription(UsbDevice usbDevice,
+      {bool requestPermission = true}) async {
     String? manufacturer;
     String? product;
     String? serialNumber;
@@ -201,7 +326,7 @@ class _QuickUsbDesktop extends QuickUsbPlatform {
         id: configDescPtr.ref.bConfigurationValue,
         index: configDescPtr.ref.iConfiguration,
         interfaces: _iterateInterface(
-                configDescPtr.ref.interface_1, configDescPtr.ref.bNumInterfaces)
+                configDescPtr.ref.interface1, configDescPtr.ref.bNumInterfaces)
             .toList(),
       );
       _libusb.libusb_free_config_descriptor(configDescPtr);
@@ -289,9 +414,9 @@ class _QuickUsbDesktop extends QuickUsbPlatform {
       var result = _libusb.libusb_bulk_transfer(
         _devHandle!,
         endpoint.endpointAddress,
-        dataPtr,
+        dataPtr.cast<UnsignedChar>(),
         maxLength,
-        actualLengthPtr,
+        actualLengthPtr.cast<Int>(),
         timeout,
       );
 
@@ -319,9 +444,9 @@ class _QuickUsbDesktop extends QuickUsbPlatform {
       var result = _libusb.libusb_bulk_transfer(
         _devHandle!,
         endpoint.endpointAddress,
-        dataPtr,
+        dataPtr.cast<UnsignedChar>(),
         data.length,
-        actualLengthPtr,
+        actualLengthPtr.cast<Int>(),
         timemout,
       );
 

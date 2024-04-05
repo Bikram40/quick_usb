@@ -1,14 +1,19 @@
+import 'package:serial_port_win32/serial_port_win32.dart';
+
 class UsbDevice {
   final String identifier;
   final int vendorId;
   final int productId;
   final int configurationCount;
 
+  final String? serialPortName;
+
   UsbDevice({
     required this.identifier,
     required this.vendorId,
     required this.productId,
     required this.configurationCount,
+    this.serialPortName,
   });
 
   factory UsbDevice.fromMap(Map<dynamic, dynamic> map) {
@@ -17,6 +22,8 @@ class UsbDevice {
       vendorId: map['vendorId'],
       productId: map['productId'],
       configurationCount: map['configurationCount'],
+      serialPortName: map['serialPortName'],
+
     );
   }
 
@@ -26,6 +33,8 @@ class UsbDevice {
       'vendorId': vendorId,
       'productId': productId,
       'configurationCount': configurationCount,
+      'serialPortName': serialPortName,
+
     };
   }
 

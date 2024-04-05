@@ -217,7 +217,7 @@ class _MyAppState extends State<MyApp> {
       onPressed: () async {
         var descriptions = await QuickUsb.getDevicesWithDescription();
         _deviceList = descriptions.map((e) => e.device).toList();
-        log('descriptions $descriptions');
+        print('descriptions $descriptions');
       },
     );
   }
@@ -228,7 +228,7 @@ class _MyAppState extends State<MyApp> {
       onPressed: () async {
         var description =
             await QuickUsb.getDeviceDescription(_deviceList.first);
-        log('description ${description.toMap()}');
+        print('description ${description.toMap()}');
       },
     );
   }
